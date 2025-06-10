@@ -3,15 +3,23 @@ package tasks
 import (
 	"log"
 	"stock-talk-service/internal/services"
-	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
-func ScheduleDailyUpdates(ftpService *services.FTPService) {
-	go func() {
-		for {
-			log.Println("Fetching data in the background...")
-			ftpService.ProcessUpdateTickers()
-			time.Sleep(24 * time.Hour)
-		}
-	}()
+// ScheduleDailyUpdates sets up a cron job to fetch tickers at midnight every day
+func ScheduleDailyUpdates(tickerService *services.TickerService) {
+	c := cron.New()
+
+	_, err := c.AddFunc("0 0 * * *", func() {
+		log.Println("Running scheduled ticker update...")
+		tickerService.FetchAndUpdateNasdaqTickers()
+		tickerService.FetchAndUpdateOtherTickers()
+	})
+
+	if err != nil {
+		log.Fatalf("Failed to schedule daily ticker update: %v", err)
+	}
+
+	c.Start()
 }
