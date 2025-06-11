@@ -10,7 +10,9 @@ import (
 	"stock-talk-service/internal/repositories"
 	"stock-talk-service/internal/services"
 	"stock-talk-service/internal/tasks"
+	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -61,6 +63,15 @@ func main() {
 
 	// Setup Gin server
 	r := gin.Default()
+
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge: 12 * time.Hour,
+	}))
 	
 	r.GET("/tickers", func(ctx *gin.Context) {
 		handlers.GetTickersHandler(ctx, tickerService)
