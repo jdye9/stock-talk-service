@@ -10,6 +10,8 @@ import (
 type Config struct {
     NasdaqFTPAddress string
     TickerDB string
+	CoingeckoBaseUrl string
+	CryptoDB string
 }
 
 func Load() (*Config, error) {
@@ -23,12 +25,16 @@ func Load() (*Config, error) {
 
 	// NASDAQ FTP
     nasdaqFTPAddress := os.Getenv("NASDAQ_FTP_ADDRESS")
+	coingeckoBaseUrl := os.Getenv("COINGECKO_BASE_URL")
 
 	// SQLITE DB
 	tickerDB := os.Getenv("TICKER_DB")
+	cryptoDB := os.Getenv("CRYPTO_DB")
 
     return &Config{
         NasdaqFTPAddress: nasdaqFTPAddress,
 		TickerDB: tickerDB,
+		CoingeckoBaseUrl: coingeckoBaseUrl,
+		CryptoDB: cryptoDB,
     }, nil
 }

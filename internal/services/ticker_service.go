@@ -3,6 +3,7 @@ package services
 import (
 	"log"
 	"stock-talk-service/internal/ftp_client"
+	"stock-talk-service/internal/models"
 	"stock-talk-service/internal/repositories"
 	"stock-talk-service/internal/utils"
 )
@@ -14,6 +15,46 @@ type TickerService struct {
 
 func NewTickerService(ftpClient *ftp_client.FTPClient, tickerRepo *repositories.TickerRepository) *TickerService {
 	return &TickerService{ftpClient: ftpClient, TickerRepo: tickerRepo}
+}
+
+// GetNasdaqTickers returns all NASDAQ tickers from the in-memory cache.
+func (s *TickerService) GetNasdaqTickers() []models.Ticker {
+	return s.TickerRepo.GetNasdaqTickers()
+}
+
+// GetOtherTickers returns all Other tickers from the in-memory cache.
+func (s *TickerService) GetOtherTickers() []models.Ticker {
+	return s.TickerRepo.GetOtherTickers()
+}
+
+// GetNasdaqTickerBySymbol returns a NASDAQ ticker by symbol from the in-memory cache.
+func (s *TickerService) GetNasdaqTickerBySymbol(symbol string) (models.Ticker, bool) {
+	return s.TickerRepo.GetNasdaqTickerBySymbol(symbol)
+}
+
+// GetOtherTickerBySymbol returns an Other ticker by symbol from the in-memory cache.
+func (s *TickerService) GetOtherTickerBySymbol(symbol string) (models.Ticker, bool) {
+	return s.TickerRepo.GetOtherTickerBySymbol(symbol)
+}
+
+// SaveNasdaqTickers replaces all NASDAQ tickers in DB and refreshes the cache.
+func (s *TickerService) SaveNasdaqTickers(tickers []models.Ticker) error {
+	return s.TickerRepo.SaveNasdaqTickers(tickers)
+}
+
+// SaveOtherTickers replaces all Other tickers in DB and refreshes the cache.
+func (s *TickerService) SaveOtherTickers(tickers []models.Ticker) error {
+	return s.TickerRepo.SaveOtherTickers(tickers)
+}
+
+// ReloadNasdaqCache reloads the NASDAQ cache from the DB.
+func (s *TickerService) ReloadNasdaqCache() error {
+	return s.TickerRepo.LoadNasdaqCache()
+}
+
+// ReloadOtherCache reloads the Other cache from the DB.
+func (s *TickerService) ReloadOtherCache() error {
+	return s.TickerRepo.LoadOtherCache()
 }
 
 func (s *TickerService) FetchAndUpdateNasdaqTickers() {
