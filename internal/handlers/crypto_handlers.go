@@ -33,6 +33,7 @@ func (h *CryptoGinHandler) GetCryptoByID(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, crypto)
 }
 
+// POST /crypto/price
 func (h *CryptoGinHandler) GetCryptoPrice(ctx *gin.Context) {
 	var req models.CryptoPriceRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -47,6 +48,7 @@ func (h *CryptoGinHandler) GetCryptoPrice(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, result)
 }
 
+// POST /crypto/history
 func (h *CryptoGinHandler) GetCryptoHistory(ctx *gin.Context) {
 	var req models.CryptoHistoryRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -61,6 +63,7 @@ func (h *CryptoGinHandler) GetCryptoHistory(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, result)
 }
 
+// POST /crypto/history-ohlc
 func (h *CryptoGinHandler) GetCryptoHistoryOHLC(ctx *gin.Context) {
 	var req models.CryptoHistoryOHLCRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {

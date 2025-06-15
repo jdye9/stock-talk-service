@@ -16,46 +16,39 @@ import (
 )
 
 func main() {
-	// Init stocks DB
-	stocksDB, err := db.InitSQLite("../../data/stocks.db", db.StockSchemas)
-	if err != nil {
-		log.Fatalf("Failed to initialize stocks DB: %v", err)
-	}
-	defer stocksDB.Close()
 
-	// Init crypto DB
-	cryptoDB, err := db.InitSQLite("../../data/crypto.db", db.CryptoSchemas)
-	if err != nil {
-		log.Fatalf("Failed to initialize crypto DB: %v", err)
-	}
-	defer cryptoDB.Close()
-
-	// FTP + service initialization
+	// Load Configurations
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	supabaseDB, err := db.InitSupabase(cfg.SupabaseConnectionString)
+	if err != nil {
+		log.Fatalf("Failed to initialize Supabase DB: %v", err)
+	}
+	defer supabaseDB.Close()
+
+	// Initialize FTP client for stocks
 	ftpClient, err := ftp_client.NewFTPClient(cfg.NasdaqFTPAddress)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer ftpClient.Close()
 
-	tickerRepo := repositories.NewTickerRepository(stocksDB)
-	tickerService := services.NewTickerService(ftpClient, tickerRepo)
+	stockRepo := repositories.NewStockRepository(supabaseDB)
+	stockService := services.NewStockService(ftpClient, stockRepo)
 
-	cryptoRepo := repositories.NewCryptoRepository(cryptoDB)
+	cryptoRepo := repositories.NewCryptoRepository(supabaseDB)
 	cryptoService := services.NewCryptoService(cryptoRepo, cfg)
 
+	watchlistRepo := repositories.NewWatchlistRepository(supabaseDB)
+	watchlistService := services.NewWatchlistService(watchlistRepo)
+
 	// Initial data fetch if DBs are empty
-	if nasdaq := tickerRepo.GetNasdaqTickers(); len(nasdaq) == 0 {
-		log.Println("Fetching Nasdaq tickers at startup...")
-		tickerService.FetchAndUpdateNasdaqTickers()
-	}
-	if other := tickerRepo.GetOtherTickers(); len(other) == 0 {
-		log.Println("Fetching Other tickers at startup...")
-		tickerService.FetchAndUpdateOtherTickers()
+	if stocks := stockRepo.GetAllStocks(); len(stocks) == 0 {
+		log.Println("Fetching stocks at startup...")
+		stockService.FetchAndUpdateAllStocks()
 	}
 	if crypto := cryptoRepo.GetAllCrypto(); len(crypto) == 0 {
 		log.Println("Fetching Crypto at startup...")
@@ -63,7 +56,7 @@ func main() {
 	}
 
 	// Daily update scheduler
-	tasks.ScheduleDailyUpdates(tickerService, cryptoService)
+	tasks.ScheduleDailyUpdates(stockService, cryptoService)
 
 	// Gin HTTP server setup
 	r := gin.Default()
@@ -77,17 +70,23 @@ func main() {
 	}))
 	
 	cryptoHandler := handlers.NewCryptoGinHandler(cryptoService)
-	
 	r.GET("/crypto", cryptoHandler.GetAllCrypto)
 	r.GET("/crypto/:id", cryptoHandler.GetCryptoByID)
 	r.POST("/crypto/price", cryptoHandler.GetCryptoPrice)
 	r.POST("/crypto/history", cryptoHandler.GetCryptoHistory)
 	r.POST("/crypto/history-ohlc", cryptoHandler.GetCryptoHistoryOHLC)
 
-	tickerHandler := handlers.NewTickerGinHandler(tickerService)
-	r.GET("/tickers", tickerHandler.GetAllTickers)
-	r.GET("/tickers/nasdaq/:symbol", tickerHandler.GetNasdaqTickerBySymbol)
-	r.GET("/tickers/other/:symbol", tickerHandler.GetOtherTickerBySymbol)
+	stockHandler := handlers.NewStockGinHandler(stockService)
+	r.GET("/stocks", stockHandler.GetAllStocks)
+	r.GET("/stocks/:ticker", stockHandler.GetStockByTicker)
+
+	watchlistHandler := handlers.NewWatchlistGinHandler(watchlistService)
+	r.GET("/watchlists", watchlistHandler.GetAllWatchlists) 
+    r.GET("/watchlists/:id", watchlistHandler.GetWatchlistByID)
+    r.POST("/watchlist", watchlistHandler.CreateWatchlist)
+    r.PUT("/watchlists/:id", watchlistHandler.UpdateWatchlist)
+    r.DELETE("/watchlists/:id", watchlistHandler.DeleteWatchlist)
+
 
 	port := ":8080"
 	log.Printf("Server running on port %s", port)

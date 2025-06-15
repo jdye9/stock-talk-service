@@ -14,36 +14,36 @@ import (
 )
 
 type CryptoService struct {
-    CryptoRepo *repositories.CryptoRepository
-    Cfg        *config.Config
+    cryptoRepo *repositories.CryptoRepository
+    cfg        *config.Config
 }
 
 func NewCryptoService(cryptoRepo *repositories.CryptoRepository, cfg *config.Config) *CryptoService {
-    return &CryptoService{CryptoRepo: cryptoRepo, Cfg: cfg}
+    return &CryptoService{cryptoRepo: cryptoRepo, cfg: cfg}
 }
 
 // GetAllCrypto returns all crypto from the in-memory cache.
 func (s *CryptoService) GetAllCrypto() []models.Crypto {
-    return s.CryptoRepo.GetAllCrypto()
+    return s.cryptoRepo.GetAllCrypto()
 }
 
 // GetCryptoByID returns a crypto by ID from the in-memory cache.
 func (s *CryptoService) GetCryptoByID(id string) (models.Crypto, bool) {
-    return s.CryptoRepo.GetCryptoByID(id)
+    return s.cryptoRepo.GetCryptoByID(id)
 }
 
 // SaveCryptos replaces all crypto in DB and refreshes the cache.
 func (s *CryptoService) SaveCrypto(crypto []models.Crypto) error {
-    return s.CryptoRepo.SaveCrypto(crypto)
+    return s.cryptoRepo.SaveCrypto(crypto)
 }
 
 // ReloadCryptosCache reloads the in-memory cache from the DB.
 func (s *CryptoService) ReloadCryptoCache() error {
-    return s.CryptoRepo.LoadCryptoCache()
+    return s.cryptoRepo.LoadCryptoCache()
 }
 
 func (s *CryptoService) GetCryptoPrice(coinIDs, vsCurrencies []string) (*models.CryptoPriceResponse, error) {
-    result, err := validation.ValidateAndRaise(s.Cfg, coinIDs, vsCurrencies)
+    result, err := validation.ValidateAndRaise(s.cfg, coinIDs, vsCurrencies)
     if err != nil {
         return &models.CryptoPriceResponse{
             Prices:               map[string]interface{}{},
@@ -52,7 +52,7 @@ func (s *CryptoService) GetCryptoPrice(coinIDs, vsCurrencies []string) (*models.
         }, nil
     }
 
-    url := fmt.Sprintf("%s/simple/price", s.Cfg.CoingeckoBaseUrl)
+    url := fmt.Sprintf("%s/simple/price", s.cfg.CoingeckoBaseUrl)
     req, _ := http.NewRequest("GET", url, nil)
     q := req.URL.Query()
     q.Add("ids", strings.Join(result.ValidCoinIDs, ","))
@@ -85,7 +85,7 @@ func (s *CryptoService) GetCryptoPrice(coinIDs, vsCurrencies []string) (*models.
 }
 
 func (s *CryptoService) GetCryptoHistory(coinIDs []string, vsCurrency, days, interval string) (*models.CryptoHistoryResponse, error) {
-    result, err := validation.ValidateAndRaise(s.Cfg, coinIDs, []string{vsCurrency})
+    result, err := validation.ValidateAndRaise(s.cfg, coinIDs, []string{vsCurrency})
     if err != nil {
         return &models.CryptoHistoryResponse{
             Data:                map[string]models.CryptoHistoryData{},
@@ -96,7 +96,7 @@ func (s *CryptoService) GetCryptoHistory(coinIDs []string, vsCurrency, days, int
 
     historyData := make(map[string]models.CryptoHistoryData)
     for _, coinID := range result.ValidCoinIDs {
-        url := fmt.Sprintf("%s/coins/%s/market_chart", s.Cfg.CoingeckoBaseUrl, coinID)
+        url := fmt.Sprintf("%s/coins/%s/market_chart", s.cfg.CoingeckoBaseUrl, coinID)
         req, _ := http.NewRequest("GET", url, nil)
         q := req.URL.Query()
         q.Add("vs_currency", result.ValidVsCurrencies[0])
@@ -141,7 +141,7 @@ func (s *CryptoService) GetCryptoHistory(coinIDs []string, vsCurrency, days, int
 }
 
 func (s *CryptoService) GetCryptoHistoryOHLC(coinIDs []string, vsCurrency, days, interval string) (*models.CryptoHistoryOHLCResponse, error) {
-    result, err := validation.ValidateAndRaise(s.Cfg, coinIDs, []string{vsCurrency})
+    result, err := validation.ValidateAndRaise(s.cfg, coinIDs, []string{vsCurrency})
     if err != nil {
         return &models.CryptoHistoryOHLCResponse{
             Data:                map[string]models.CryptoHistoryOHLCData{},
@@ -152,7 +152,7 @@ func (s *CryptoService) GetCryptoHistoryOHLC(coinIDs []string, vsCurrency, days,
 
     ohlcData := make(map[string]models.CryptoHistoryOHLCData)
     for _, coinID := range result.ValidCoinIDs {
-        url := fmt.Sprintf("%s/coins/%s/ohlc", s.Cfg.CoingeckoBaseUrl, coinID)
+        url := fmt.Sprintf("%s/coins/%s/ohlc", s.cfg.CoingeckoBaseUrl, coinID)
         req, _ := http.NewRequest("GET", url, nil)
         q := req.URL.Query()
         q.Add("vs_currency", result.ValidVsCurrencies[0])

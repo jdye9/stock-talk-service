@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"stock-talk-service/internal/models"
+	"strings"
 	"sync"
 )
 
@@ -22,7 +23,7 @@ func NewCryptoRepository(db *sql.DB) *CryptoRepository {
 
 // LoadCryptoCache loads all crypto from DB into the in-memory cache.
 func (r *CryptoRepository) LoadCryptoCache() error {
-    rows, err := r.db.Query("SELECT id, symbol, name FROM crypto")
+    rows, err := r.db.Query("SELECT id, coingecko_id, ticker, name FROM crypto")
     if err != nil {
         return err
     }
@@ -31,7 +32,7 @@ func (r *CryptoRepository) LoadCryptoCache() error {
     cache := make(map[string]models.Crypto)
     for rows.Next() {
         var c models.Crypto
-        if err := rows.Scan(&c.Id, &c.Symbol, &c.Name); err != nil {
+        if err := rows.Scan(&c.Id, &c.CoingeckoId, &c.Ticker, &c.Name); err != nil {
             return err
         }
         cache[c.Id] = c
@@ -64,7 +65,6 @@ func (r *CryptoRepository) GetAllCrypto() []models.Crypto {
 
 // SaveCrypto replaces all crypto in DB and refreshes the cache.
 func (r *CryptoRepository) SaveCrypto(crypto []models.Crypto) error {
-	fmt.Println(crypto)
     tx, err := r.db.Begin()
     if err != nil {
         return err
@@ -76,17 +76,30 @@ func (r *CryptoRepository) SaveCrypto(crypto []models.Crypto) error {
         return err
     }
 
-    stmt, err := tx.Prepare("INSERT INTO crypto (uid, id, symbol, name) VALUES (?, ?, ?, ?)")
-    if err != nil {
-        return err
-    }
-    defer stmt.Close()
+    batchSize := 1000
+	total := len(crypto)
 
-    for _, c := range crypto {
-        if _, err := stmt.Exec(c.Uid, c.Id, c.Symbol, c.Name); err != nil {
-            return err
-        }
-    }
+	for start := 0; start < total; start += batchSize {
+		end := start + batchSize
+		if end > total {
+			end = total
+		}
+		batch := crypto[start:end]
+
+		var (
+			args        []interface{}
+			placeholders []string
+		)
+		for i, s := range batch {
+			placeholders = append(placeholders, fmt.Sprintf("($%d, $%d, $%d)", i*3+1, i*3+2, i*3+3))
+			args = append(args, s.Ticker, s.CoingeckoId, s.Name,)
+		}
+
+		query := "INSERT INTO crypto (ticker, coingecko_id, name) VALUES " + strings.Join(placeholders, ",")
+		if _, err := tx.Exec(query, args...); err != nil {
+			return err
+		}
+	}
 
     if err := tx.Commit(); err != nil {
         return err
