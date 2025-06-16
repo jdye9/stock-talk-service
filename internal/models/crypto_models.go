@@ -2,12 +2,14 @@ package models
 
 type Crypto struct {
 	Id string `json:"id"`
+	Uid string `json:"uid"`
 	Ticker string `json:"ticker"`
 	Name string `json:"name"`
 	CoingeckoId string `json:"coingecko_id"`
 }
 
 type CryptoJSON struct {
+	Uid	 string `json:"uid"`
     Ticker  string `json:"ticker"`
     Name    string `json:"name"`
     Aliases struct {
@@ -21,6 +23,7 @@ func (cj CryptoJSON) ToCrypto() Crypto {
     	Ticker: cj.Ticker,
         Name:   cj.Name,
 		CoingeckoId: cj.Aliases.CoinGeckoID,
+		Uid: cj.Uid,
 
     }
 }

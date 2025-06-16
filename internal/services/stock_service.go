@@ -10,7 +10,7 @@ import (
 )
 
 type StockService struct {
-	ftpClient  *ftp_client.FTPClient
+	ftpClient *ftp_client.FTPClient
 	stockRepo *repositories.StockRepository
 }
 
@@ -19,66 +19,83 @@ func NewStockService(ftpClient *ftp_client.FTPClient, stockRepo *repositories.St
 }
 
 func (s *StockService) GetAllStocks() []models.Stock {
-    return s.stockRepo.GetAllStocks()
+	return s.stockRepo.GetAllStocks()
 }
 
 func (s *StockService) GetStockByTicker(ticker string) (models.Stock, bool) {
-    return s.stockRepo.GetStockByTicker(ticker)
+	return s.stockRepo.GetStockByTicker(ticker)
 }
 
-func (s *StockService) SaveStocks(stocks []models.Stock) error {
-    return s.stockRepo.SaveStocks(stocks)
+func (s *StockService) SaveStocksInitialLoad(stocks []models.Stock) error {
+	return s.stockRepo.SaveStocksInitialLoad(stocks)
 }
 
-func (s *StockService) FetchAndUpdateAllStocks() {
-    type source struct {
-        Path      string
-        Exchange  string
-        ParseFunc func(file io.ReadCloser) ([]models.Stock, error)
-    }
+func (s *StockService) SaveStocksWithReview(stocks []models.Stock) error {
+	return s.stockRepo.SaveStocksWithReview(stocks)
+}
 
-    sources := []source{
-        {
-            Path:      "/SymbolDirectory/nasdaqlisted.txt",
-            Exchange:  "NASDAQ",
-            ParseFunc: func(file io.ReadCloser) ([]models.Stock, error) {
-                return utils.ParseNasdaqListed(file)
-            },
-        },
-        {
-            Path:      "/SymbolDirectory/otherlisted.txt",
-            Exchange:  "OTHER",
-            ParseFunc: func(file io.ReadCloser) ([]models.Stock, error) {
-                return utils.ParseOtherListed(file)
-            },
-        },
-    }
+// Fetch from FTP and parse both NASDAQ and other listed, return combined slice
+func (s *StockService) FetchAllStocks() ([]models.Stock, error) {
+	type source struct {
+		Path      string
+		Exchange  string
+		ParseFunc func(file io.ReadCloser) ([]models.Stock, error)
+	}
 
-    var allStocks []models.Stock
+	sources := []source{
+		{
+			Path:      "/SymbolDirectory/nasdaqlisted.txt",
+			Exchange:  "NASDAQ",
+			ParseFunc: func(file io.ReadCloser) ([]models.Stock, error) {
+				return utils.ParseNasdaqListed(file)
+			},
+		},
+		{
+			Path:      "/SymbolDirectory/otherlisted.txt",
+			Exchange:  "OTHER",
+			ParseFunc: func(file io.ReadCloser) ([]models.Stock, error) {
+				return utils.ParseOtherListed(file)
+			},
+		},
+	}
 
-    for _, src := range sources {
-        file, err := s.ftpClient.RetrieveFile(src.Path)
-        if err != nil {
-            log.Printf("Error fetching %s: %v", src.Path, err)
-            continue
-        }
+	var allStocks []models.Stock
 
-        stocks, err := src.ParseFunc(file)
-        if err != nil {
-            log.Printf("Error parsing %s: %v", src.Path, err)
-            continue
-        }
+	for _, src := range sources {
+		file, err := s.ftpClient.RetrieveFile(src.Path)
+		if err != nil {
+			log.Printf("Error fetching %s: %v", src.Path, err)
+			continue
+		}
 
-
-        allStocks = append(allStocks, stocks...)
-        log.Printf("%s stocks updated: %d", src.Exchange, len(stocks))
+		stocks, err := src.ParseFunc(file)
 		file.Close()
-    }
+		if err != nil {
+			log.Printf("Error parsing %s: %v", src.Path, err)
+			continue
+		}
 
-    if err := s.stockRepo.SaveStocks(allStocks); err != nil {
-        log.Printf("Error saving stocks: %v", err)
-        return
-    }
+		allStocks = append(allStocks, stocks...)
+		log.Printf("%s stocks fetched: %d", src.Exchange, len(stocks))
+	}
 
-    log.Printf("All stocks updated: %d", len(allStocks))
+	return allStocks, nil
+}
+
+// Wrapper to fetch and save initial load
+func (s *StockService) InitializeStocks() error {
+	stocks, err := s.FetchAllStocks()
+	if err != nil {
+		return err
+	}
+	return s.SaveStocksInitialLoad(stocks)
+}
+
+// Wrapper to fetch and save with review
+func (s *StockService) FetchAndUpdateAllStocks() error {
+	stocks, err := s.FetchAllStocks()
+	if err != nil {
+		return err
+	}
+	return s.SaveStocksWithReview(stocks)
 }

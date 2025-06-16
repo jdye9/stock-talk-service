@@ -16,7 +16,6 @@ import (
 )
 
 func main() {
-
 	// Load Configurations
 	cfg, err := config.Load()
 	if err != nil {
@@ -36,6 +35,7 @@ func main() {
 	}
 	defer ftpClient.Close()
 
+	// Set up repositories and services
 	stockRepo := repositories.NewStockRepository(supabaseDB)
 	stockService := services.NewStockService(ftpClient, stockRepo)
 
@@ -46,13 +46,23 @@ func main() {
 	watchlistService := services.NewWatchlistService(watchlistRepo)
 
 	// Initial data fetch if DBs are empty
+	if err := stockRepo.LoadStockCache(); err != nil {
+		log.Fatalf("Failed to load stock cache: %v", err)
+	}
 	if stocks := stockRepo.GetAllStocks(); len(stocks) == 0 {
 		log.Println("Fetching stocks at startup...")
-		stockService.FetchAndUpdateAllStocks()
+		if err := stockService.InitializeStocks(); err != nil {
+			log.Fatalf("Failed to initialize stock data: %v", err)
+		}
+	}
+	if err := cryptoRepo.LoadCryptoCache(); err != nil {
+		log.Fatalf("Failed to load crypto cache: %v", err)
 	}
 	if crypto := cryptoRepo.GetAllCrypto(); len(crypto) == 0 {
 		log.Println("Fetching Crypto at startup...")
-		cryptoService.FetchAndUpdateCrypto()
+		if err := cryptoService.InitializeCrypto(); err != nil {
+			log.Fatalf("Failed to initialize crypto data: %v", err)
+		}
 	}
 
 	// Daily update scheduler
@@ -68,7 +78,8 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
-	
+
+	// Handlers
 	cryptoHandler := handlers.NewCryptoGinHandler(cryptoService)
 	r.GET("/crypto", cryptoHandler.GetAllCrypto)
 	r.GET("/crypto/:id", cryptoHandler.GetCryptoByID)
@@ -81,12 +92,11 @@ func main() {
 	r.GET("/stocks/:ticker", stockHandler.GetStockByTicker)
 
 	watchlistHandler := handlers.NewWatchlistGinHandler(watchlistService)
-	r.GET("/watchlists", watchlistHandler.GetAllWatchlists) 
-    r.GET("/watchlists/:id", watchlistHandler.GetWatchlistByID)
-    r.POST("/watchlist", watchlistHandler.CreateWatchlist)
-    r.PUT("/watchlists/:id", watchlistHandler.UpdateWatchlist)
-    r.DELETE("/watchlists/:id", watchlistHandler.DeleteWatchlist)
-
+	r.GET("/watchlists", watchlistHandler.GetAllWatchlists)
+	r.GET("/watchlists/:id", watchlistHandler.GetWatchlistByID)
+	r.POST("/watchlist", watchlistHandler.CreateWatchlist)
+	r.PUT("/watchlists/:id", watchlistHandler.UpdateWatchlist)
+	r.DELETE("/watchlists/:id", watchlistHandler.DeleteWatchlist)
 
 	port := ":8080"
 	log.Printf("Server running on port %s", port)
