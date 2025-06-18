@@ -22,8 +22,8 @@ func (s *StockService) GetAllStocks() []models.Stock {
 	return s.stockRepo.GetAllStocks()
 }
 
-func (s *StockService) GetStockByTicker(ticker string) (models.Stock, bool) {
-	return s.stockRepo.GetStockByTicker(ticker)
+func (s *StockService) GetStockById(id string) (models.Stock, bool) {
+	return s.stockRepo.GetStockById(id)
 }
 
 func (s *StockService) SaveStocksInitialLoad(stocks []models.Stock) error {

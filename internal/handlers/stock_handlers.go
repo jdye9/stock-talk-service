@@ -25,8 +25,8 @@ func (h *StockGinHandler) GetAllStocks(ctx *gin.Context) {
 
 // GET /stocks/:ticker
 func (h *StockGinHandler) GetStockByTicker(ctx *gin.Context) {
-    ticker := ctx.Param("ticker")
-    stock, ok := h.Service.GetStockByTicker(ticker)
+    id := ctx.Param("id")
+    stock, ok := h.Service.GetStockById(id)
     if !ok {
         ctx.JSON(http.StatusNotFound, gin.H{"error": "stock not found"})
         return

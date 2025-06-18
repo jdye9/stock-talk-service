@@ -11,7 +11,7 @@ import (
 
 type CryptoRepository struct {
 	db         *sql.DB
-	cache      map[string]models.Crypto // coingecko_id -> Crypto
+	cache      map[string]models.Crypto // id -> Crypto
 	cacheMutex sync.RWMutex
 }
 
@@ -35,7 +35,7 @@ func (r *CryptoRepository) LoadCryptoCache() error {
 		if err := rows.Scan(&c.Id, &c.Uid, &c.CoingeckoId, &c.Ticker, &c.Name); err != nil {
 			return err
 		}
-		cache[c.CoingeckoId] = c
+		cache[c.Id] = c
 	}
 
 	r.cacheMutex.Lock()
@@ -54,14 +54,13 @@ func (r *CryptoRepository) GetAllCrypto() []models.Crypto {
 	return cryptos
 }
 
-func (r *CryptoRepository) GetCryptoByID(coingeckoId string) (models.Crypto, bool) {
+func (r *CryptoRepository) GetCryptoByID(id string) (models.Crypto, bool) {
 	r.cacheMutex.RLock()
 	defer r.cacheMutex.RUnlock()
-	c, ok := r.cache[coingeckoId]
+	c, ok := r.cache[id]
 	return c, ok
 }
 
-// Initial load: Insert all cryptos, mark active, no manual review
 func (r *CryptoRepository) SaveCryptoInitialLoad(cryptos []models.Crypto) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -69,7 +68,6 @@ func (r *CryptoRepository) SaveCryptoInitialLoad(cryptos []models.Crypto) error 
 	}
 	defer tx.Rollback()
 
-	// Clear existing data
 	_, err = tx.Exec("DELETE FROM crypto")
 	if err != nil {
 		return err
@@ -92,7 +90,7 @@ func (r *CryptoRepository) SaveCryptoInitialLoad(cryptos []models.Crypto) error 
 		)
 		for i, c := range batch {
 			placeholders = append(placeholders, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)", i*6+1, i*6+2, i*6+3, i*6+4, i*6+5, i*6+6))
-			args = append(args, c.Uid, c.CoingeckoId, c.Ticker, c.Name, true, now) // active = true, updated_at
+			args = append(args, c.Uid, c.CoingeckoId, c.Ticker, c.Name, true, now)
 		}
 
 		query := "INSERT INTO crypto (uid, coingecko_id, ticker, name, active, updated_at) VALUES " + strings.Join(placeholders, ",")
@@ -108,13 +106,17 @@ func (r *CryptoRepository) SaveCryptoInitialLoad(cryptos []models.Crypto) error 
 	return r.LoadCryptoCache()
 }
 
-// Subsequent updates: review changes, auto-update same name different ID, mark missing for manual review
 func (r *CryptoRepository) SaveCryptoWithReview(latestCryptos []models.Crypto) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	_, err = tx.Exec("DELETE FROM pending_crypto_review")
+	if err != nil {
+		return err
+	}
 
 	existing := make(map[string]models.Crypto)
 	rows, err := tx.Query("SELECT id, uid, coingecko_id, ticker, name FROM crypto")
@@ -136,49 +138,224 @@ func (r *CryptoRepository) SaveCryptoWithReview(latestCryptos []models.Crypto) e
 	}
 
 	now := time.Now()
-	// Process incoming cryptos
-	for _, latest := range latestCryptos {
-		existingCrypto, exists := existing[latest.Uid]
-		if exists {
-			// Same Uid exists, update fields if changed
-			if existingCrypto.Name != latest.Name {
-				_, err := tx.Exec("UPDATE crypto SET uid = $1, coingecko_id = $2, ticker = $3, name = $4, updated_at = $5 WHERE id = $6", latest.Uid, latest.CoingeckoId, latest.Ticker, latest.Name, now, existingCrypto.Id)
-				if err != nil {
-					return err
-				}
-			}
-			continue
-		}
 
-		// If UID is new, check if Name or Ticker matches existing (changed UID scenario)
-		autoMatched := false
-		for _, oldCrypto := range existing {
-			if oldCrypto.Name == latest.Name || oldCrypto.Ticker == latest.Ticker {
-				_, err := tx.Exec("UPDATE crypto SET uid = $1, coingecko_id = $2, ticker = $3, name = $4, updated_at = $5 WHERE id = $6", latest.Uid, latest.CoingeckoId, latest.Ticker, latest.Name, now, oldCrypto.Id)
-				if err != nil {
-					return err
-				}
-				autoMatched = true
-				break
-			}
-		}
-		if autoMatched {
-			continue
-		}
+	// Prepare UIDs list for queries
+	uids := make([]interface{}, 0, len(latestCryptos))
+	for _, c := range latestCryptos {
+		uids = append(uids, c.Uid)
+	}
 
-		// New UID + name and ticker not matching existing - add to manual review
-		_, err := tx.Exec("INSERT INTO pending_crypto_review (uid, coingecko_id, ticker, name, reason) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (uid, coingecko_id, ticker, name, reason) DO NOTHING", latest.Uid, latest.CoingeckoId, latest.Ticker, latest.Name, "new_id_and_name")
-		if err != nil {
+	// STEP 1: Resolve previously missing UIDs that now reappear
+	if len(uids) > 0 {
+		placeholders := make([]string, len(uids))
+		for i := range uids {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		query := fmt.Sprintf(`
+			UPDATE pending_crypto_review
+			SET resolved = TRUE, resolved_at = $%d
+			WHERE uid IN (%s) AND reason = 'uid_missing' AND resolved = FALSE
+		`, len(uids)+1, strings.Join(placeholders, ","))
+		args := append(uids, now)
+		if _, err = tx.Exec(query, args...); err != nil {
 			return err
 		}
 	}
 
-	// Identify existing cryptos missing from latest data - mark for review for deactivation/removal
-	for oldID, oldCrypto := range existing {
-		if _, found := latestMap[oldID]; !found {
-			_, err := tx.Exec("INSERT INTO pending_crypto_review (uid, coingecko_id, ticker, name, reason) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (uid, coingecko_id, ticker, name, reason) DO NOTHING", oldCrypto.Uid, oldCrypto.CoingeckoId, oldCrypto.Ticker, oldCrypto.Name, "id_missing")
+	// STEP 2: Resolve 'uid_new' if UID no longer in latest list
+	if len(uids) > 0 {
+		placeholders := make([]string, len(uids))
+		for i := range uids {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		query := fmt.Sprintf(`
+			UPDATE pending_crypto_review
+			SET resolved = TRUE, resolved_at = $%d
+			WHERE uid NOT IN (%s) AND reason = 'uid_new' AND resolved = FALSE
+		`, len(uids)+1, strings.Join(placeholders, ","))
+		args := append(uids, now)
+		if _, err = tx.Exec(query, args...); err != nil {
+			return err
+		}
+	}
+
+	// STEP 3: Auto-resolve reverted name/ticker discrepancies
+	rows, err = tx.Query(`
+		SELECT id, uid, reason FROM pending_crypto_review
+		WHERE resolved = FALSE AND reason IN ('name_changed', 'ticker_changed', 'name_ticker_changed')
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type pendingReview struct {
+		ID     string
+		UID    string
+		Reason string
+	}
+	var pending []pendingReview
+	for rows.Next() {
+		var r pendingReview
+		if err := rows.Scan(&r.ID, &r.UID, &r.Reason); err != nil {
+			return err
+		}
+		pending = append(pending, r)
+	}
+
+	for _, r := range pending {
+		var originalName, originalTicker string
+		err := tx.QueryRow(`SELECT name, ticker FROM crypto WHERE uid = $1`, r.UID).Scan(&originalName, &originalTicker)
+		if err != nil {
+			// Crypto no longer exists — skip
+			continue
+		}
+
+		latest, ok := latestMap[r.UID]
+		if !ok {
+			continue
+		}
+
+		resolved := false
+		switch r.Reason {
+		case "name_changed":
+			if latest.Name == originalName {
+				resolved = true
+			}
+		case "ticker_changed":
+			if latest.Ticker == originalTicker {
+				resolved = true
+			}
+		case "name_ticker_changed":
+			if latest.Name == originalName || latest.Ticker == originalTicker {
+				resolved = true
+			}
+		}
+
+		if resolved {
+			if _, err := tx.Exec(`UPDATE pending_crypto_review SET resolved = TRUE, resolved_at = $1 WHERE id = $2`, now, r.ID); err != nil {
+				return err
+			}
+		}
+	}
+
+	// STEP 4: Insert/update pending_crypto_review with new discrepancies
+	for _, latest := range latestCryptos {
+		existingCrypto, exists := existing[latest.Uid]
+		if exists {
+			nameChanged := existingCrypto.Name != latest.Name
+			tickerChanged := existingCrypto.Ticker != latest.Ticker
+
+			if nameChanged && tickerChanged {
+				// Check for existing unresolved combined reason
+				var count int
+				err := tx.QueryRow(`
+					SELECT COUNT(*) FROM pending_crypto_review
+					WHERE uid = $1 AND reason = 'name_ticker_changed' AND resolved = FALSE
+				`, latest.Uid).Scan(&count)
+				if err != nil {
+					return err
+				}
+				if count == 0 {
+					_, err := tx.Exec(`
+						INSERT INTO pending_crypto_review (uid, coingecko_id, ticker, name, reason, resolved, created_at)
+						VALUES ($1, $2, $3, $4, 'name_ticker_changed', FALSE, $5)
+					`, latest.Uid, latest.CoingeckoId, latest.Ticker, latest.Name, now)
+					if err != nil {
+						return err
+					}
+				}
+
+				// Mark individual name_changed and ticker_changed as resolved to avoid duplicates
+				_, err = tx.Exec(`
+					UPDATE pending_crypto_review
+					SET resolved = TRUE, resolved_at = $1
+					WHERE uid = $2 AND reason IN ('name_changed', 'ticker_changed') AND resolved = FALSE
+				`, now, latest.Uid)
+				if err != nil {
+					return err
+				}
+
+			} else if nameChanged {
+				var count int
+				err := tx.QueryRow(`
+					SELECT COUNT(*) FROM pending_crypto_review
+					WHERE uid = $1 AND name = $2 AND reason = 'name_changed' AND resolved = FALSE
+				`, latest.Uid, latest.Name).Scan(&count)
+				if err != nil {
+					return err
+				}
+				if count == 0 {
+					_, err := tx.Exec(`
+						INSERT INTO pending_crypto_review (uid, coingecko_id, ticker, name, reason, resolved, created_at)
+						VALUES ($1, $2, $3, $4, 'name_changed', FALSE, $5)
+					`, latest.Uid, latest.CoingeckoId, latest.Ticker, latest.Name, now)
+					if err != nil {
+						return err
+					}
+				}
+
+			} else if tickerChanged {
+				var count int
+				err := tx.QueryRow(`
+					SELECT COUNT(*) FROM pending_crypto_review
+					WHERE uid = $1 AND ticker = $2 AND reason = 'ticker_changed' AND resolved = FALSE
+				`, latest.Uid, latest.Ticker).Scan(&count)
+				if err != nil {
+					return err
+				}
+				if count == 0 {
+					_, err := tx.Exec(`
+						INSERT INTO pending_crypto_review (uid, coingecko_id, ticker, name, reason, resolved, created_at)
+						VALUES ($1, $2, $3, $4, 'ticker_changed', FALSE, $5)
+					`, latest.Uid, latest.CoingeckoId, latest.Ticker, latest.Name, now)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			continue
+		}
+
+		// UID not found → uid_new
+		var count int
+		err := tx.QueryRow(`
+			SELECT COUNT(*) FROM pending_crypto_review
+			WHERE uid = $1 AND coingecko_id = $2 AND ticker = $3 AND name = $4 AND reason = 'uid_new' AND resolved = FALSE
+		`, latest.Uid, latest.CoingeckoId, latest.Ticker, latest.Name).Scan(&count)
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			_, err := tx.Exec(`
+				INSERT INTO pending_crypto_review (uid, coingecko_id, ticker, name, reason, resolved, created_at)
+				VALUES ($1, $2, $3, $4, 'uid_new', FALSE, $5)
+			`, latest.Uid, latest.CoingeckoId, latest.Ticker, latest.Name, now)
 			if err != nil {
 				return err
+			}
+		}
+	}
+
+	// STEP 5: Mark missing UIDs for review
+	for oldUID, oldCrypto := range existing {
+		if _, found := latestMap[oldUID]; !found {
+			var count int
+			err := tx.QueryRow(`
+				SELECT COUNT(*) FROM pending_crypto_review
+				WHERE uid = $1 AND coingecko_id = $2 AND ticker = $3 AND name = $4 AND reason = 'uid_missing' AND resolved = FALSE
+			`, oldCrypto.Uid, oldCrypto.CoingeckoId, oldCrypto.Ticker, oldCrypto.Name).Scan(&count)
+			if err != nil {
+				return err
+			}
+			if count == 0 {
+				_, err := tx.Exec(`
+					INSERT INTO pending_crypto_review (uid, coingecko_id, ticker, name, reason, resolved, created_at)
+					VALUES ($1, $2, $3, $4, 'uid_missing', FALSE, $5)
+				`, oldCrypto.Uid, oldCrypto.CoingeckoId, oldCrypto.Ticker, oldCrypto.Name, now)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -188,3 +365,4 @@ func (r *CryptoRepository) SaveCryptoWithReview(latestCryptos []models.Crypto) e
 	}
 	return r.LoadCryptoCache()
 }
+

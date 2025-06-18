@@ -6,6 +6,7 @@ type Crypto struct {
 	Ticker string `json:"ticker"`
 	Name string `json:"name"`
 	CoingeckoId string `json:"coingecko_id"`
+	Active bool `json:"active"`
 }
 
 type CryptoJSON struct {
@@ -81,4 +82,12 @@ type CryptoHistoryOHLCResponse struct {
     Data                map[string]CryptoHistoryOHLCData `json:"data"`
     InvalidCoinIDs      []string            `json:"invalid_coin_ids"`
     InvalidVsCurrencies []string            `json:"invalid_vs_currencies"`
+}
+
+type CryptoReviewInsert struct {
+	Uid         string
+	CoingeckoId string
+	Ticker      string
+	Name        string
+	Reason      string
 }

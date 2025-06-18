@@ -11,7 +11,7 @@ import (
 
 type StockRepository struct {
 	db         *sql.DB
-	cache      map[string]models.Stock // ticker -> Stock
+	cache      map[string]models.Stock // id -> Stock
 	cacheMutex sync.RWMutex
 }
 
@@ -35,7 +35,7 @@ func (r *StockRepository) LoadStockCache() error {
 		if err := rows.Scan(&s.Id, &s.Ticker, &s.Name); err != nil {
 			return err
 		}
-		cache[s.Ticker] = s
+		cache[s.Id] = s
 	}
 
 	r.cacheMutex.Lock()
@@ -54,14 +54,14 @@ func (r *StockRepository) GetAllStocks() []models.Stock {
 	return stocks
 }
 
-func (r *StockRepository) GetStockByTicker(ticker string) (models.Stock, bool) {
+func (r *StockRepository) GetStockById(id string) (models.Stock, bool) {
 	r.cacheMutex.RLock()
 	defer r.cacheMutex.RUnlock()
-	s, ok := r.cache[ticker]
+	s, ok := r.cache[id]
 	return s, ok
 }
 
-// Initial load: Insert all stocks, mark active, no manual review
+// Initial load: Delete all and reinsert (safe in dev or once)
 func (r *StockRepository) SaveStocksInitialLoad(stocks []models.Stock) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -69,7 +69,6 @@ func (r *StockRepository) SaveStocksInitialLoad(stocks []models.Stock) error {
 	}
 	defer tx.Rollback()
 
-	// Clear existing data
 	_, err = tx.Exec("DELETE FROM stock")
 	if err != nil {
 		return err
@@ -92,7 +91,7 @@ func (r *StockRepository) SaveStocksInitialLoad(stocks []models.Stock) error {
 		)
 		for i, s := range batch {
 			placeholders = append(placeholders, fmt.Sprintf("($%d, $%d, $%d, $%d)", i*4+1, i*4+2, i*4+3, i*4+4))
-			args = append(args, s.Ticker, s.Name, true, now) // active = true, updated_at
+			args = append(args, s.Ticker, s.Name, true, now)
 		}
 
 		query := "INSERT INTO stock (ticker, name, active, updated_at) VALUES " + strings.Join(placeholders, ",")
@@ -108,13 +107,18 @@ func (r *StockRepository) SaveStocksInitialLoad(stocks []models.Stock) error {
 	return r.LoadStockCache()
 }
 
-// Subsequent updates: review changes, auto-update same name different ticker, mark missing for manual review
+// SaveStocksWithReview applies manual review logic according to your spec
 func (r *StockRepository) SaveStocksWithReview(latestStocks []models.Stock) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	_, err = tx.Exec("DELETE FROM pending_stock_review")
+	if err != nil {
+		return err
+	}
 
 	existing := make(map[string]models.Stock)
 	rows, err := tx.Query("SELECT id, ticker, name FROM stock")
@@ -131,56 +135,158 @@ func (r *StockRepository) SaveStocksWithReview(latestStocks []models.Stock) erro
 	}
 
 	latestMap := make(map[string]models.Stock)
+	tickers := make([]interface{}, 0, len(latestStocks))
 	for _, s := range latestStocks {
 		latestMap[s.Ticker] = s
+		tickers = append(tickers, s.Ticker)
 	}
 
 	now := time.Now()
 
-	// Process incoming stocks
-	for _, latest := range latestStocks {
-		existingStock, exists := existing[latest.Ticker]
-		if exists {
-			// Same ticker exists, update name if changed
-			if existingStock.Name != latest.Name {
-				_, err := tx.Exec("UPDATE stock SET name = $1, updated_at = $2 WHERE ticker = $3", latest.Name, now, latest.Ticker)
-				if err != nil {
-					return err
-				}
-			}
-			continue
+	// STEP 1: Resolve reappeared tickers previously marked as missing
+	if len(tickers) > 0 {
+		placeholders := make([]string, len(tickers))
+		for i := range tickers {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
 		}
-
-		// If ticker is new, check if name matches existing (changed ticker scenario)
-		autoMatched := false
-		for _, oldStock := range existing {
-			if oldStock.Name == latest.Name {
-				// Update old ticker to new ticker
-				_, err := tx.Exec("UPDATE stock SET ticker = $1, updated_at = $2 WHERE id = $3", latest.Ticker, now, oldStock.Id)
-				if err != nil {
-					return err
-				}
-				autoMatched = true
-				break
-			}
-		}
-		if autoMatched {
-			continue
-		}
-
-		// New ticker + name not matching existing - add to manual review
-		_, err := tx.Exec("INSERT INTO pending_stock_review (ticker, name, reason) VALUES ($1, $2, $3) ON CONFLICT (ticker, name, reason) DO NOTHING", latest.Ticker, latest.Name, "new_ticker_and_name")
-		if err != nil {
+		query := fmt.Sprintf(`
+			UPDATE pending_stock_review
+			SET resolved = TRUE, resolved_at = $%d
+			WHERE ticker IN (%s) AND reason = 'ticker_missing' AND resolved = FALSE
+		`, len(tickers)+1, strings.Join(placeholders, ","))
+		args := append(tickers, now)
+		if _, err := tx.Exec(query, args...); err != nil {
 			return err
 		}
 	}
 
-	// Identify existing stocks missing from latest data - mark for review for deactivation/removal
-	for oldTicker, oldStock := range existing {
-		if _, found := latestMap[oldTicker]; !found {
-			_, err := tx.Exec("INSERT INTO pending_stock_review (ticker, name, reason) VALUES ($1, $2, $3) ON CONFLICT (ticker, name, reason) DO NOTHING", oldTicker, oldStock.Name, "ticker_missing")
+	// STEP 2: Resolve 'ticker_new' for tickers no longer in latest
+	if len(tickers) > 0 {
+		placeholders := make([]string, len(tickers))
+		for i := range tickers {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		query := fmt.Sprintf(`
+			UPDATE pending_stock_review
+			SET resolved = TRUE, resolved_at = $%d
+			WHERE ticker NOT IN (%s) AND reason = 'ticker_new' AND resolved = FALSE
+		`, len(tickers)+1, strings.Join(placeholders, ","))
+		args := append(tickers, now)
+		if _, err := tx.Exec(query, args...); err != nil {
+			return err
+		}
+	}
+
+	// STEP 3: Auto-resolve name_changed if name reverted
+	rows, err = tx.Query(`
+		SELECT id, ticker, name FROM pending_stock_review
+		WHERE reason = 'name_changed' AND resolved = FALSE
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type pendingReview struct {
+		ID     string
+		Ticker string
+		Name   string
+	}
+	var pending []pendingReview
+	for rows.Next() {
+		var r pendingReview
+		if err := rows.Scan(&r.ID, &r.Ticker, &r.Name); err != nil {
+			return err
+		}
+		pending = append(pending, r)
+	}
+
+	for _, r := range pending {
+		original, ok := existing[r.Ticker]
+		if !ok {
+			continue
+		}
+		latest, ok := latestMap[r.Ticker]
+		if !ok {
+			continue
+		}
+		if latest.Name == original.Name {
+			if _, err := tx.Exec(`
+				UPDATE pending_stock_review
+				SET resolved = TRUE, resolved_at = $1
+				WHERE id = $2
+			`, now, r.ID); err != nil {
+				return err
+			}
+		}
+	}
+
+	// STEP 4: Insert new review items for discrepancies
+	for _, latest := range latestStocks {
+		existingStock, exists := existing[latest.Ticker]
+
+		if exists {
+			if latest.Name != existingStock.Name {
+				var count int
+				err := tx.QueryRow(`
+					SELECT COUNT(*) FROM pending_stock_review
+					WHERE ticker = $1 AND name = $2 AND reason = 'name_changed' AND resolved = FALSE
+				`, latest.Ticker, latest.Name).Scan(&count)
+				if err != nil {
+					return err
+				}
+				if count == 0 {
+					_, err := tx.Exec(`
+						INSERT INTO pending_stock_review (ticker, name, reason, resolved, created_at)
+						VALUES ($1, $2, 'name_changed', FALSE, $3)
+					`, latest.Ticker, latest.Name, now)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			continue
+		}
+
+		// ticker is new → 'ticker_new'
+		var count int
+		err := tx.QueryRow(`
+			SELECT COUNT(*) FROM pending_stock_review
+			WHERE ticker = $1 AND name = $2 AND reason = 'ticker_new' AND resolved = FALSE
+		`, latest.Ticker, latest.Name).Scan(&count)
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			_, err := tx.Exec(`
+				INSERT INTO pending_stock_review (ticker, name, reason, resolved, created_at)
+				VALUES ($1, $2, 'ticker_new', FALSE, $3)
+			`, latest.Ticker, latest.Name, now)
 			if err != nil {
 				return err
+			}
+		}
+	}
+
+	// STEP 5: Flag missing tickers
+	for oldTicker, oldStock := range existing {
+		if _, found := latestMap[oldTicker]; !found {
+			var count int
+			err := tx.QueryRow(`
+				SELECT COUNT(*) FROM pending_stock_review
+				WHERE ticker = $1 AND name = $2 AND reason = 'ticker_missing' AND resolved = FALSE
+			`, oldTicker, oldStock.Name).Scan(&count)
+			if err != nil {
+				return err
+			}
+			if count == 0 {
+				_, err := tx.Exec(`
+					INSERT INTO pending_stock_review (ticker, name, reason, resolved, created_at)
+					VALUES ($1, $2, 'ticker_missing', FALSE, $3)
+				`, oldTicker, oldStock.Name, now)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -190,3 +296,4 @@ func (r *StockRepository) SaveStocksWithReview(latestStocks []models.Stock) erro
 	}
 	return r.LoadStockCache()
 }
+

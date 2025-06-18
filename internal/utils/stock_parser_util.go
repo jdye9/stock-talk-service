@@ -22,7 +22,7 @@ func ParseNasdaqListed(r io.Reader) ([]models.Stock, error) {
 
     for i := 0; i < len(lines)-1; i++ {
         line := lines[i]
-        if strings.Contains(line, "|") && !strings.HasPrefix(line, "Ticker|") {
+        if strings.Contains(line, "|") && !strings.HasPrefix(line, "Symbol|") {
             parts := strings.Split(line, "|")
             if len(parts) >= 2 {
                 stocks = append(stocks, models.Stock{Ticker: parts[0], Name: parts[1]})
