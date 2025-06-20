@@ -11,7 +11,7 @@ import (
 func ScheduleDailyUpdates(stockService *services.StockService, cryptoService *services.CryptoService) {
 	c := cron.New()
 
-	_, err := c.AddFunc("@every 1m", func() {
+	_, err := c.AddFunc("0 0 * * *", func() {
 		log.Println("Running scheduled stock update...")
 		errS := stockService.FetchAndUpdateAllStocks()
 		if errS != nil {

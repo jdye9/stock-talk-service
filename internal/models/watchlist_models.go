@@ -1,11 +1,15 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
 type Watchlist struct {
 	Id     string  `json:"id"`
 	Name string `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
+	Stocks []Stock `json:"stocks"`
+	Crypto []Crypto `json:"crypto"`
 }
 
 type CreateWatchlistRequest struct {

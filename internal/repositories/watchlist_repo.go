@@ -31,12 +31,19 @@ func (r *WatchlistRepository) GetAllWatchlists() ([]models.Watchlist, error) {
 	}
 	defer rows.Close()
 
-	var watchlists []models.Watchlist
+	var watchlists = []models.Watchlist{}
 	for rows.Next() {
 		var w models.Watchlist
 		if err := rows.Scan(&w.Id, &w.Name, &w.CreatedAt); err != nil {
 			return nil, err
 		}
+		stocks, err := r.GetWatchlistStocksById(w.Id)
+		if err != nil {
+			return nil, err
+		}
+
+		w.Stocks = stocks
+
 		watchlists = append(watchlists, w)
 	}
 	return watchlists, nil
@@ -126,5 +133,26 @@ func (r *WatchlistRepository) DeleteWatchlist(id int64) error {
 	}
 
 	return tx.Commit()
+}
+
+func (r *WatchlistRepository) GetWatchlistStocksById(watchlistId string) ([]models.Stock, error) {
+	rows, err := r.db.Query(
+		"SELECT s.id, s.ticker, s.name FROM watchlist_stock ws JOIN stock s ON ws.stock_id = s.id WHERE ws.watchlist_id = $1",
+		watchlistId,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stocks []models.Stock
+	for rows.Next() {
+		var stock models.Stock
+		if err := rows.Scan(&stock.Id, &stock.Ticker, &stock.Name); err != nil {
+			return nil, err
+		}
+		stocks = append(stocks, stock)
+	}
+	return stocks, nil
 }
 

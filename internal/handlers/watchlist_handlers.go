@@ -61,11 +61,7 @@ func (h *WatchlistHandler) CreateWatchlist(ctx *gin.Context) {
         ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
         return
     }
-    ctx.JSON(http.StatusCreated, gin.H{
-		"watchlist":       watchlist,
-		"watchlistStocks": watchlistStocks,
-		"watchlistCrypto": watchlistCrypto,
-	})
+    ctx.JSON(http.StatusCreated, watchlist)
 }
 
 // PUT /watchlists/:id

@@ -94,7 +94,7 @@ func main() {
 	watchlistHandler := handlers.NewWatchlistGinHandler(watchlistService)
 	r.GET("/watchlists", watchlistHandler.GetAllWatchlists)
 	r.GET("/watchlists/:id", watchlistHandler.GetWatchlistByID)
-	r.POST("/watchlist", watchlistHandler.CreateWatchlist)
+	r.POST("/create-watchlist", watchlistHandler.CreateWatchlist)
 	r.PUT("/watchlists/:id", watchlistHandler.UpdateWatchlist)
 	r.DELETE("/watchlists/:id", watchlistHandler.DeleteWatchlist)
 
