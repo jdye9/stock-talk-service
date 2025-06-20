@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-func ParseNasdaqListed(r io.Reader) ([]models.Ticker, error) {
+func ParseNasdaqListed(r io.Reader) ([]models.Stock, error) {
     scanner := bufio.NewScanner(r)
-    var tickers []models.Ticker
+    var stocks []models.Stock
     var lines []string
 
     for scanner.Scan() {
@@ -25,18 +25,18 @@ func ParseNasdaqListed(r io.Reader) ([]models.Ticker, error) {
         if strings.Contains(line, "|") && !strings.HasPrefix(line, "Symbol|") {
             parts := strings.Split(line, "|")
             if len(parts) >= 2 {
-                tickers = append(tickers, models.Ticker{Symbol: parts[0], Name: parts[1]})
+                stocks = append(stocks, models.Stock{Ticker: parts[0], Name: parts[1]})
             }
         }
     }
 
-    return tickers, nil
+    return stocks, nil
 }
 
 
-func ParseOtherListed(r io.Reader) ([]models.Ticker, error) {
+func ParseOtherListed(r io.Reader) ([]models.Stock, error) {
     scanner := bufio.NewScanner(r)
-    var tickers []models.Ticker
+    var stocks []models.Stock
     var lines []string
 
     for scanner.Scan() {
@@ -53,10 +53,10 @@ func ParseOtherListed(r io.Reader) ([]models.Ticker, error) {
         if strings.Contains(line, "|") && !strings.HasPrefix(line, "ACT Symbol|") {
             parts := strings.Split(line, "|")
             if len(parts) >= 2 {
-                tickers = append(tickers, models.Ticker{Symbol: parts[0], Name: parts[1]})
+                stocks = append(stocks, models.Stock{Ticker: parts[0], Name: parts[1]})
             }
         }
     }
 
-    return tickers, nil
+    return stocks, nil
 }

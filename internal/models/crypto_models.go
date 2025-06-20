@@ -2,15 +2,17 @@ package models
 
 type Crypto struct {
 	Id string `json:"id"`
-	Symbol string `json:"symbol"`
+	Uid string `json:"uid"`
+	Ticker string `json:"ticker"`
 	Name string `json:"name"`
-	Uid string `json:"uid,omitempty"`
+	CoingeckoId string `json:"coingecko_id"`
+	Active bool `json:"active"`
 }
 
 type CryptoJSON struct {
+	Uid	 string `json:"uid"`
     Ticker  string `json:"ticker"`
     Name    string `json:"name"`
-	Uid	 string `json:"uid"`
     Aliases struct {
         CoinGeckoID string `json:"coingecko_id"`
     } `json:"aliases"`
@@ -19,10 +21,11 @@ type CryptoJSON struct {
 // To convert to your Crypto struct:
 func (cj CryptoJSON) ToCrypto() Crypto {
     return Crypto{
-        Id:     cj.Aliases.CoinGeckoID,
-        Symbol: cj.Ticker,
+    	Ticker: cj.Ticker,
         Name:   cj.Name,
+		CoingeckoId: cj.Aliases.CoinGeckoID,
 		Uid: cj.Uid,
+
     }
 }
 
@@ -79,4 +82,12 @@ type CryptoHistoryOHLCResponse struct {
     Data                map[string]CryptoHistoryOHLCData `json:"data"`
     InvalidCoinIDs      []string            `json:"invalid_coin_ids"`
     InvalidVsCurrencies []string            `json:"invalid_vs_currencies"`
+}
+
+type CryptoReviewInsert struct {
+	Uid         string
+	CoingeckoId string
+	Ticker      string
+	Name        string
+	Reason      string
 }
